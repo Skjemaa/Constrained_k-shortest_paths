@@ -1,0 +1,12 @@
+class Node{
+
+   public:
+   
+   int valeur;
+   int dist;
+   
+   
+   Node(int s, int d);
+   ~Node();
+   
+   };

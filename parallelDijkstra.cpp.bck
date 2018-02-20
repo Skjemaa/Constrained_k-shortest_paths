@@ -1,0 +1,185 @@
+#include<stdio.h>
+#include<limits.h>
+#include <iostream>
+#include <set>
+#include <utility> // for pair
+#include "parallelDijkstra.hpp"
+#include "Arc.hpp"
+#include <mpi.h>
+
+parallelDijkstra::parallelDijkstra(std::vector<double> dist, std::vector<int> prev){
+   
+   this->distance = dist;
+   this->previous = prev;
+}
+
+void parallelDijkstra::ShortestPath (Graph g, int source,int id, int p){
+   
+  
+   
+   double  max_weight = 100000;
+   int n = g.graph.size();
+   
+   
+   bool visited[n];
+   for (int i =0;i<n;i++){
+      visited[i]=false;
+   }
+   
+   
+   this->distance.resize(n,max_weight);
+   this->previous.resize(n,-1);
+   this->previous[source] = source;
+   this->distance[source]=0;
+   
+   
+   
+   // Calcul de delta0
+   double delta0 [n];
+   for(int i =0; i<n ; i++){
+      double minDelta0 = max_weight;
+      for (std::vector<Arc >::iterator j = g.graph[i].begin(); j
+            != g.graph[i].end();++j) {
+         if (j->weight < minDelta0){
+            minDelta0 = j->weight;
+         }
+      }
+      delta0[i]=minDelta0;
+   }
+   
+   // initialisation de ind : le tableau qui a chaque point assicie un processeur
+   int ind [n];
+   for(int i =0; i<n ; i++){
+      ind[i] = i%p;
+   }
+   //delta0 et ind ont ete calcule par tous le monde
+   
+   // initialisation de Q et QQ (QQ a ete nommee Q* dans la reference)
+   std::set<std::pair<double,int> > Q;
+   std::set<std::pair<double,int> > QQ;
+   
+   if ( id == ind[source] ){
+      Q.insert(std::make_pair(0,source));
+      QQ.insert(std::make_pair(delta0[source],source));
+   }
+   
+   
+   while(!Q.empty()){
+      std::cout<<id<<"    once"<<std::endl;
+      
+      // Step 1
+      double localL =0 ;
+      if (!QQ.empty()){
+         localL = QQ.begin()->first;;
+      }
+      
+      double L ;
+      L = MPI_Allreduce(&localL,&L,1,MPI_DOUBLE,MPI_MIN,MPI_COMM_WORLD);
+      
+      // Step 2
+      std::vector<int> RLocal1;
+      std::vector<double> RLocal2;
+      
+      std::cout<<id<<"    before the boucle"<<std::endl;
+      for (std::set<std::pair<double,int> >::iterator z = Q.begin(); z
+               != Q.end();++z) {
+         if (z->first<=L){
+            for (std::vector<Arc >::iterator j = g.graph[z->second].begin(); j
+                  != g.graph[z->second].end();++j) {
+               RLocal1.push_back(j->destination);
+               RLocal2.push_back(z->first + j->weight);
+            
+            
+            }
+            Q.erase(z);  // a verifier : la modification de Q ->boucle 8alta ?
+         
+             QQ.erase(z);
+          }
+      }
+      std::cout<<id<<"    after the boucle"<<std::endl;
+      
+      //Sending the sizes of RLoclal to the root 
+      int r = RLocal1.size();
+      int RLocal1_tab [r];
+      double RLocal2_tab [r]; //converting RLocal to tableau for easier MPI 
+      for (int i =0;i<r;i++){
+         RLocal1_tab[i]=RLocal1[i];
+         RLocal2_tab[i]=RLocal2[i];
+      }
+      
+      
+      
+      int recvcounts1 [p];
+      int RLocalSizes [p];
+      
+      for (int i =0;i<p;i++){
+         recvcounts1[i]=1;
+      }
+      
+      int displs1 [p];
+      
+      for (int i =0;i<p;i++){
+         displs1[i]=i;
+      }
+      
+      MPI_Gatherv(&r,1,MPI_INT,&RLocalSizes,recvcounts1,displs1,MPI_INT,0,MPI_COMM_WORLD);
+      
+      //Broadcasting these sizes to everyone 
+      
+      MPI_Bcast(&RLocalSizes,p,MPI_INT,0,MPI_COMM_WORLD);
+      
+      // Gathering all the RLocals
+      
+      int sum = 0;
+      int displs2 [p];
+      for(int i =0;i<p;i++){
+         sum = sum + RLocalSizes[i];
+         displs2[i]=sum;
+      }
+      
+      int R1 [sum];
+      double R2 [sum];
+      
+      
+      MPI_Gatherv(&RLocal1_tab,r,MPI_INT,&R1,RLocalSizes,displs2,MPI_INT,0,MPI_COMM_WORLD);
+      MPI_Gatherv(&RLocal2_tab,r,MPI_DOUBLE,&R1,RLocalSizes,displs2,MPI_DOUBLE,0,MPI_COMM_WORLD);
+      
+      // broadcating R1 and R2
+      MPI_Bcast(&R1, sum, MPI_INT, 0, MPI_COMM_WORLD);
+      MPI_Bcast(&R2, sum, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+      
+      std::vector<double> BLocal;
+      
+      for (int i = 0; i<sum; i++){
+         if(ind[R1[i]]==id){
+            BLocal.push_back(R2[i]);  
+         }
+      }
+      
+      //step 5 :
+      
+      for (int i = 0 ; i<BLocal.size(); i++){
+         double x = BLocal[i];
+         if (this->distance[i]>x){
+            Q.erase(std::make_pair(this->distance[i],i));
+            QQ.erase(std::make_pair(this->distance[i]+delta0[i],i));
+            
+            this->distance[i]=x;
+            
+            Q.insert(std::make_pair(this->distance[i],i));
+            QQ.insert(std::make_pair(this->distance[i]+delta0[i],i));
+         }
+      }
+   }
+}
+
+      
+      
+      
+      
+      
+
+         
+         
+parallelDijkstra::~parallelDijkstra(){}
+         

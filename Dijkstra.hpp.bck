@@ -1,0 +1,20 @@
+#include<utility>
+#include<limits.h>
+#include<stdio.h>
+#include <iostream>
+#include <set>
+
+
+class Dijkstra{
+
+   public :
+   
+   Dijkstra();
+   ~Dijkstra();
+   void ShortestPath(Graph g, int source);
+   
+   
+   std::vector<double> distance;
+   std::vector<int> previous;
+   
+   };
